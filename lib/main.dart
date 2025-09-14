@@ -15,6 +15,12 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Shared, immutable page transition theme reused across light/dark themes
+const PageTransitionsTheme _kPageTransitionsTheme = PageTransitionsTheme(builders: {
+  TargetPlatform.android: ZoomPageTransitionsBuilder(),
+  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+});
+
 // ========================= Station Grouping (Top-level) =========================
 class _StationGroupInfo {
   const _StationGroupInfo(this.name, this.nameEn, this.stationIds);
@@ -447,19 +453,17 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 初始設定螢幕方向為直向，稍後會由 AccessibilityProvider 控制
   if (!kIsWeb) {
-    await SystemChrome.setPreferredOrientations([
+    // Do not block startup longer than necessary
+    unawaited(SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
-    ]);
+    ]));
+    // 設定系統UI樣式 (non-blocking)
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   }
   
-  // 設定系統UI樣式
-  if (!kIsWeb) {
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  }
-  
-  // 測試API響應時間以優化自動刷新間隔
-  await LrtApiService.testResponseTime();
+  // 測試API響應時間以優化自動刷新間隔 (non-blocking)
+  unawaited(LrtApiService.testResponseTime());
   
   runApp(const LrtApp());
 }
@@ -480,79 +484,75 @@ class LrtApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ScheduleProvider()..loadCacheAlertSetting()),
         ChangeNotifierProvider(create: (_) => RoutesCatalogProvider()..loadFromEmbeddedJson()),
       ],
-      child: Builder(
-        builder: (context) {
-                      return Consumer3<LanguageProvider, ThemeProvider, AccessibilityProvider>(
-              builder: (context, lang, themeProvider, accessibility, _) {
-                return MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    textScaler: TextScaler.linear(accessibility.pageScale),
-                  ),
-                  child: MaterialApp(
-                    title: lang.isEnglish ? 'LRT Next Train' : '輕鐵班次',
-                theme: ThemeData(
-                  useMaterial3: true,
-                  colorSchemeSeed: themeProvider.seedColor,
-                  brightness: themeProvider.useSystemTheme 
-                      ? MediaQuery.platformBrightnessOf(context) == Brightness.dark ? Brightness.dark : Brightness.light
-                      : themeProvider.isDarkMode ? Brightness.dark : Brightness.light,
-                  pageTransitionsTheme: const PageTransitionsTheme(builders: {
-                    TargetPlatform.android: ZoomPageTransitionsBuilder(),
-                    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-                  }),
-                  textTheme: Theme.of(context).textTheme.apply(
-                    fontSizeFactor: accessibility.textScale,
-                  ),
+      child: Consumer3<LanguageProvider, ThemeProvider, AccessibilityProvider>(
+        builder: (context, lang, themeProvider, accessibility, _) {
+          final Brightness platformBrightness = MediaQuery.platformBrightnessOf(context);
+          final bool useDark = themeProvider.useSystemTheme
+              ? (platformBrightness == Brightness.dark)
+              : themeProvider.isDarkMode;
+          final TextTheme baseTextTheme = Theme.of(context).textTheme.apply(
+                fontSizeFactor: accessibility.textScale,
+              );
+          return MaterialApp(
+            title: lang.isEnglish ? 'LRT Next Train' : '輕鐵班次',
+            theme: ThemeData(
+              useMaterial3: true,
+              colorSchemeSeed: themeProvider.seedColor,
+              brightness: useDark ? Brightness.dark : Brightness.light,
+              pageTransitionsTheme: _kPageTransitionsTheme,
+              textTheme: baseTextTheme,
+            ),
+            darkTheme: ThemeData(
+              useMaterial3: true,
+              colorSchemeSeed: themeProvider.seedColor,
+              brightness: Brightness.dark,
+              pageTransitionsTheme: _kPageTransitionsTheme,
+              textTheme: baseTextTheme.copyWith(
+                // 針對深色主題優化文字顏色對比度
+                bodyLarge: baseTextTheme.bodyLarge?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.87),
                 ),
-                darkTheme: ThemeData(
-                  useMaterial3: true,
-                  colorSchemeSeed: themeProvider.seedColor,
-                  brightness: Brightness.dark,
-                  pageTransitionsTheme: const PageTransitionsTheme(builders: {
-                    TargetPlatform.android: ZoomPageTransitionsBuilder(),
-                    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-                  }),
-                  textTheme: Theme.of(context).textTheme.apply(
-                    fontSizeFactor: accessibility.textScale,
-                  ).copyWith(
-                    // 針對深色主題優化文字顏色對比度
-                    bodyLarge: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.87),
-                    ),
-                    bodyMedium: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.87),
-                    ),
-                    bodySmall: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.60),
-                    ),
-                    titleLarge: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.95),
-                      fontWeight: FontWeight.w600,
-                    ),
-                    titleMedium: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.87),
-                      fontWeight: FontWeight.w600,
-                    ),
-                    titleSmall: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.87),
-                    ),
-                    headlineMedium: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.95),
-                      fontWeight: FontWeight.w600,
-                    ),
-                    labelLarge: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.87),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                bodyMedium: baseTextTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.87),
                 ),
-                themeMode: themeProvider.useSystemTheme 
-                    ? ThemeMode.system 
-                    : themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-                home: const HomePage(),
+                bodySmall: baseTextTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.60),
+                ),
+                titleLarge: baseTextTheme.titleLarge?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.95),
+                  fontWeight: FontWeight.w600,
+                ),
+                titleMedium: baseTextTheme.titleMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.87),
+                  fontWeight: FontWeight.w600,
+                ),
+                titleSmall: baseTextTheme.titleSmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.87),
+                ),
+                headlineMedium: baseTextTheme.headlineMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.95),
+                  fontWeight: FontWeight.w600,
+                ),
+                labelLarge: baseTextTheme.labelLarge?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.87),
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            );
+            ),
+            themeMode: themeProvider.useSystemTheme
+                ? ThemeMode.system
+                : (themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light),
+            builder: (context, child) {
+              // Apply page-level scaler here to avoid rebuilding an outer MediaQuery
+              final media = MediaQuery.of(context);
+              return MediaQuery(
+                data: media.copyWith(
+                  textScaler: TextScaler.linear(accessibility.pageScale),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              );
             },
+            home: const HomePage(),
           );
         },
       ),
